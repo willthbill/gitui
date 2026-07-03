@@ -23,6 +23,32 @@
 
 ![](demo.gif)
 
+## Fork additions
+
+This fork adds a few quality-of-life features on top of upstream gitui:
+
+- **Stable diff view across option changes**: changing diff options
+  (context lines, whitespace) keeps scroll position and selection on
+  the same file line instead of jumping back to the top.
+- **Context-line keys in the diff view**: `diff_context_increase`
+  (default `=`) and `diff_context_decrease` (default `-`) change the
+  number of context lines directly, without opening the options popup.
+- **GUI editor support**: set the `GITUI_GUI_EDITOR` environment
+  variable to open files in a GUI editor without suspending the TUI.
+  The command is split on whitespace; `{file}` and `{line}` are
+  substituted (if `{file}` is absent, the path is appended). From the
+  diff view the currently selected line is passed. Commit messages
+  still use the regular terminal editor. Examples:
+
+  ```sh
+  export GITUI_GUI_EDITOR="code --reuse-window --goto {file}:{line}"
+  export GITUI_GUI_EDITOR="cursor --reuse-window --goto {file}:{line}"
+  export GITUI_GUI_EDITOR="subl {file}:{line}"
+  ```
+
+  When unset, behavior is identical to upstream (`GIT_EDITOR`/
+  `VISUAL`/`EDITOR` in the terminal).
+
 ## <a name="table-of-contents"></a> Table of Contents
 
 1. [Features](#features)
