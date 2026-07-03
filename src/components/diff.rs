@@ -180,6 +180,16 @@ impl DiffComponent {
 		if self.current.hash != hash {
 			let reset_selection = self.current.path != path;
 
+			let old_selection = match self.selection {
+				Selection::Single(line) => line,
+				Selection::Multiple(start, _) => start,
+			};
+			let old_selection_position = if reset_selection {
+				None
+			} else {
+				self.selected_line_position(old_selection)
+			};
+
 			self.current = Current {
 				path,
 				is_stage,
@@ -212,11 +222,20 @@ impl DiffComponent {
 				self.selection = Selection::Single(0);
 				self.update_selection(0);
 			} else {
-				let old_selection = match self.selection {
-					Selection::Single(line) => line,
-					Selection::Multiple(start, _) => start,
-				};
-				self.update_selection(old_selection);
+				// the diff changed (e.g. different diff options):
+				// re-find the previously selected line by its file
+				// line numbers since plain line indices shift
+				let new_selection = self
+					.diff
+					.as_ref()
+					.zip(old_selection_position)
+					.and_then(|(diff, position)| {
+						Self::find_line_index_by_position(
+							diff, position,
+						)
+					})
+					.unwrap_or(old_selection);
+				self.update_selection(new_selection);
 			}
 		}
 	}
@@ -250,6 +269,54 @@ impl DiffComponent {
 
 			self.update_selection(new_start);
 		}
+	}
+
+	fn selected_line_position(
+		&self,
+		index: usize,
+	) -> Option<DiffLinePosition> {
+		let position = self
+			.diff
+			.as_ref()?
+			.hunks
+			.iter()
+			.flat_map(|hunk| hunk.lines.iter())
+			.nth(index)?
+			.position;
+
+		// hunk headers carry no line numbers
+		(position != DiffLinePosition::default()).then_some(position)
+	}
+
+	fn find_line_index_by_position(
+		diff: &FileDiff,
+		position: DiffLinePosition,
+	) -> Option<usize> {
+		let distance = |line: &DiffLine| {
+			let old = position
+				.old_lineno
+				.zip(line.position.old_lineno)
+				.map(|(a, b)| a.abs_diff(b));
+			let new = position
+				.new_lineno
+				.zip(line.position.new_lineno)
+				.map(|(a, b)| a.abs_diff(b));
+
+			match (old, new) {
+				(Some(old), Some(new)) => Some(old.min(new)),
+				(distance @ Some(_), None)
+				| (None, distance @ Some(_)) => distance,
+				(None, None) => None,
+			}
+		};
+
+		diff.hunks
+			.iter()
+			.flat_map(|hunk| hunk.lines.iter())
+			.enumerate()
+			.filter_map(|(i, line)| distance(line).map(|d| (i, d)))
+			.min_by_key(|&(_, distance)| distance)
+			.map(|(i, _)| i)
 	}
 
 	fn update_selection(&mut self, new_start: usize) {

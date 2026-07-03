@@ -532,7 +532,10 @@ impl Status {
 	) -> Result<(), anyhow::Error> {
 		if let Some(diff) = self.git_diff.request(diff_params)? {
 			self.diff.update(path, is_stage, diff);
-		} else {
+		} else if self.diff.current() != (path, is_stage) {
+			// keep displaying the current diff (and its scroll
+			// position) while waiting for the new one, unless it
+			// is for a different file
 			self.diff.clear(true);
 		}
 
