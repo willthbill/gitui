@@ -25,7 +25,13 @@ use ratatui::{
 };
 use scopeguard::defer;
 use std::ffi::OsStr;
-use std::{env, io, path::Path, process::Command};
+use std::{
+	env, io,
+	path::Path,
+	process::{Command, Stdio},
+};
+
+const GUI_EDITOR_ENV: &str = "GITUI_GUI_EDITOR";
 
 ///
 pub struct ExternalEditorPopup {
@@ -42,6 +48,73 @@ impl ExternalEditorPopup {
 			theme: env.theme.clone(),
 			key_config: env.key_config.clone(),
 		}
+	}
+
+	/// returns the gui editor command template from
+	/// `GITUI_GUI_EDITOR` if configured (e.g.
+	/// `code --reuse-window --goto {file}:{line}`)
+	pub fn gui_editor() -> Option<String> {
+		env::var(GUI_EDITOR_ENV)
+			.ok()
+			.filter(|template| !template.trim().is_empty())
+	}
+
+	/// opens file at given `path` (optionally at `line`) using the
+	/// gui editor configured via `GITUI_GUI_EDITOR` without
+	/// suspending the tui. the template is split on whitespace and
+	/// `{file}`/`{line}` placeholders are substituted; if no
+	/// `{file}` placeholder is present the path is appended.
+	// `{file}`/`{line}` are placeholders of the command template,
+	// not (rust) formatting args
+	#[allow(clippy::literal_string_with_formatting_args)]
+	pub fn open_file_in_gui_editor(
+		repo: &RepoPath,
+		path: &Path,
+		line: Option<u32>,
+	) -> Result<()> {
+		let template = Self::gui_editor().ok_or_else(|| {
+			anyhow!("{GUI_EDITOR_ENV} not configured")
+		})?;
+
+		let work_dir = repo_work_dir(repo)?;
+
+		let path = if path.is_relative() {
+			Path::new(&work_dir).join(path)
+		} else {
+			path.into()
+		};
+
+		if !path.exists() {
+			bail!("file not found: {path:?}");
+		}
+
+		let file = path.display().to_string();
+		let line = line.unwrap_or(1).to_string();
+
+		// Note: like the terminal editor handling below this does
+		// not support arguments containing whitespace
+		let mut args: Vec<String> = template
+			.split_whitespace()
+			.map(|arg| {
+				arg.replace("{file}", &file).replace("{line}", &line)
+			})
+			.collect();
+
+		if !template.contains("{file}") {
+			args.push(file);
+		}
+
+		let command = args.remove(0);
+
+		Command::new(&command)
+			.args(args)
+			.current_dir(work_dir)
+			.stdout(Stdio::null())
+			.stderr(Stdio::null())
+			.status()
+			.map_err(|e| anyhow!("\"{command}\": {e}"))?;
+
+		Ok(())
 	}
 
 	/// opens file at given `path` in an available editor

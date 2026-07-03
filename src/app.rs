@@ -816,10 +816,28 @@ impl App {
 				}
 			}
 			InternalEvent::OpenExternalEditor(path) => {
-				self.input.set_polling(false);
-				self.external_editor_popup.show()?;
-				self.file_to_open = path;
-				flags.insert(NeedsUpdate::COMMANDS);
+				// if a gui editor is configured, files open in it
+				// without leaving the tui; commit messages
+				// (`None`) always use the terminal editor flow
+				if let Some(path) = path.as_ref().filter(|_| {
+					ExternalEditorPopup::gui_editor().is_some()
+				}) {
+					if let Err(e) =
+						ExternalEditorPopup::open_file_in_gui_editor(
+							&self.repo.borrow(),
+							Path::new(path),
+							None,
+						) {
+						self.queue.push(InternalEvent::ShowErrorMsg(
+							format!("open editor error:\n{e}"),
+						));
+					}
+				} else {
+					self.input.set_polling(false);
+					self.external_editor_popup.show()?;
+					self.file_to_open = path;
+					flags.insert(NeedsUpdate::COMMANDS);
+				}
 			}
 			InternalEvent::Push(branch, push_type, force, delete) => {
 				self.push_popup

@@ -8,7 +8,7 @@ use crate::{
 	components::{CommandInfo, Component, EventState},
 	keys::{key_match, SharedKeyConfig},
 	options::SharedOptions,
-	popups::AppOption,
+	popups::{AppOption, ExternalEditorPopup},
 	queue::{Action, InternalEvent, NeedsUpdate, Queue, ResetItem},
 	string_utils::tabs_to_spaces,
 	string_utils::trim_offset,
@@ -270,6 +270,22 @@ impl DiffComponent {
 
 			self.update_selection(new_start);
 		}
+	}
+
+	fn open_in_gui_editor(&self) -> Result<()> {
+		let selection = match self.selection {
+			Selection::Single(line) => line,
+			Selection::Multiple(start, _) => start,
+		};
+		let line = self
+			.selected_line_position(selection)
+			.and_then(|pos| pos.new_lineno.or(pos.old_lineno));
+
+		ExternalEditorPopup::open_file_in_gui_editor(
+			&self.repo.borrow(),
+			Path::new(&self.current.path),
+			line,
+		)
 	}
 
 	fn change_context_lines(&self, increase: bool) {
@@ -990,11 +1006,19 @@ impl Component for DiffComponent {
 				} else if key_match(e, self.key_config.keys.edit_file)
 					&& self.can_edit_file()
 				{
-					self.queue.push(
-						InternalEvent::OpenExternalEditor(Some(
-							self.current.path.clone(),
-						)),
-					);
+					if ExternalEditorPopup::gui_editor().is_some() {
+						try_or_popup!(
+							self,
+							"open editor error:",
+							self.open_in_gui_editor()
+						);
+					} else {
+						self.queue.push(
+							InternalEvent::OpenExternalEditor(Some(
+								self.current.path.clone(),
+							)),
+						);
+					}
 					Ok(EventState::Consumed)
 				} else if key_match(
 					e,
