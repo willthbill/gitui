@@ -8,6 +8,7 @@ use crate::{
 	components::{CommandInfo, Component, EventState},
 	keys::{key_match, SharedKeyConfig},
 	options::SharedOptions,
+	popups::AppOption,
 	queue::{Action, InternalEvent, NeedsUpdate, Queue, ResetItem},
 	string_utils::tabs_to_spaces,
 	string_utils::trim_offset,
@@ -269,6 +270,13 @@ impl DiffComponent {
 
 			self.update_selection(new_start);
 		}
+	}
+
+	fn change_context_lines(&self, increase: bool) {
+		self.options.borrow_mut().diff_context_change(increase);
+		self.queue.push(InternalEvent::OptionSwitched(
+			AppOption::DiffContextLines,
+		));
 	}
 
 	fn selected_line_position(
@@ -886,6 +894,21 @@ impl Component for DiffComponent {
 		}
 
 		out.push(CommandInfo::new(
+			strings::commands::diff_context_increase(
+				&self.key_config,
+			),
+			true,
+			self.focused(),
+		));
+		out.push(CommandInfo::new(
+			strings::commands::diff_context_decrease(
+				&self.key_config,
+			),
+			true,
+			self.focused(),
+		));
+
+		out.push(CommandInfo::new(
 			strings::commands::copy(&self.key_config),
 			true,
 			self.focused(),
@@ -951,6 +974,18 @@ impl Component for DiffComponent {
 					self.key_config.keys.diff_hunk_prev,
 				) {
 					self.diff_hunk_move_up_down(-1);
+					Ok(EventState::Consumed)
+				} else if key_match(
+					e,
+					self.key_config.keys.diff_context_increase,
+				) {
+					self.change_context_lines(true);
+					Ok(EventState::Consumed)
+				} else if key_match(
+					e,
+					self.key_config.keys.diff_context_decrease,
+				) {
+					self.change_context_lines(false);
 					Ok(EventState::Consumed)
 				} else if key_match(e, self.key_config.keys.edit_file)
 					&& self.can_edit_file()
