@@ -134,6 +134,8 @@ pub enum SyntaxHighlightProgress {
 pub enum AsyncAppNotification {
 	///
 	SyntaxHighlighting(SyntaxHighlightProgress),
+	///
+	CommitMsgGenerated,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

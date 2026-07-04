@@ -1173,6 +1173,19 @@ pub mod commands {
 			CMD_GROUP_COMMIT_POPUP,
 		)
 	}
+	pub fn commit_generate_msg(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Generate Msg [{}]",
+				key_config
+					.get_hint(key_config.keys.commit_generate_msg),
+			),
+			"generate commit message from the staged changes (via GITUI_COMMIT_MSG_CMD)",
+			CMD_GROUP_COMMIT_POPUP,
+		)
+	}
 	pub fn commit_next_msg_from_history(
 		key_config: &SharedKeyConfig,
 	) -> CommandText {

@@ -441,6 +441,7 @@ impl App {
 		self.blame_file_popup.update_async(ev)?;
 		self.revision_files_popup.update(ev)?;
 		self.tags_popup.update(ev);
+		self.commit_popup.update_async(ev);
 
 		//TODO: better system for this
 		// can we simply process the queue here and everyone just uses the queue to schedule a cmd update?

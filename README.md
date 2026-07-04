@@ -48,6 +48,16 @@ This fork adds a few quality-of-life features on top of upstream gitui:
 
   When unset, behavior is identical to upstream (`GIT_EDITOR`/
   `VISUAL`/`EDITOR` in the terminal).
+- **Commit message generation**: set `GITUI_COMMIT_MSG_CMD` to a
+  command that reads a diff on stdin and prints a commit message.
+  `commit_generate_msg` (default `Ctrl+g`) in the commit popup pipes
+  the staged diff through it asynchronously and fills the message
+  box with the result, ready to edit and commit. Example using
+  [Claude Code](https://claude.com/claude-code):
+
+  ```sh
+  export GITUI_COMMIT_MSG_CMD="claude --model haiku -p 'Write a conventional commit message for the diff on stdin. Output only the raw commit message.'"
+  ```
 
 ## <a name="table-of-contents"></a> Table of Contents
 

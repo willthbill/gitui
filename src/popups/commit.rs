@@ -9,8 +9,9 @@ use crate::{
 	queue::{InternalEvent, NeedsUpdate, Queue},
 	strings, try_or_popup,
 	ui::style::SharedTheme,
+	AsyncAppNotification, AsyncNotification,
 };
-use anyhow::{bail, Ok, Result};
+use anyhow::{anyhow, bail, Ok, Result};
 use asyncgit::sync::commit::commit_message_prettify;
 use asyncgit::{
 	cached,
@@ -20,6 +21,7 @@ use asyncgit::{
 	},
 	StatusItem, StatusItemType,
 };
+use crossbeam_channel::Sender;
 use crossterm::event::Event;
 use easy_cast::Cast;
 use ratatui::{
@@ -29,11 +31,15 @@ use ratatui::{
 };
 
 use std::{
+	env,
 	fmt::Write as _,
 	fs::{read_to_string, File},
 	io::{Read, Write},
 	path::PathBuf,
+	process::Command,
 	str::FromStr,
+	sync::{Arc, Mutex},
+	thread,
 };
 
 use super::ExternalEditorPopup;
@@ -63,9 +69,14 @@ pub struct CommitPopup {
 	commit_msg_history_idx: usize,
 	options: SharedOptions,
 	verify: bool,
+	sender_app: Sender<AsyncAppNotification>,
+	generated_msg: Arc<Mutex<Option<Result<String>>>>,
+	generating: bool,
 }
 
 const FIRST_LINE_LIMIT: usize = 50;
+
+const COMMIT_MSG_CMD_ENV: &str = "GITUI_COMMIT_MSG_CMD";
 
 impl CommitPopup {
 	///
@@ -89,12 +100,142 @@ impl CommitPopup {
 			commit_msg_history_idx: 0,
 			options: env.options.clone(),
 			verify: true,
+			sender_app: env.sender_app.clone(),
+			generated_msg: Arc::default(),
+			generating: false,
 		}
 	}
 
 	///
 	pub fn update(&mut self) {
 		self.git_branch_name.lookup().ok();
+	}
+
+	///
+	pub fn update_async(&mut self, ev: AsyncNotification) {
+		if matches!(
+			ev,
+			AsyncNotification::App(
+				AsyncAppNotification::CommitMsgGenerated
+			)
+		) && self.generating
+		{
+			self.generating = false;
+			self.input.set_title(self.default_title());
+
+			let result = self
+				.generated_msg
+				.lock()
+				.expect("poisoned lock")
+				.take();
+
+			match result {
+				Some(Result::Ok(msg)) => {
+					if self.is_visible() {
+						self.input.set_text(msg);
+					}
+				}
+				Some(Err(e)) => {
+					self.queue.push(InternalEvent::ShowErrorMsg(
+						format!(
+							"generating commit message failed:\n{e}"
+						),
+					));
+				}
+				None => (),
+			}
+		}
+	}
+
+	fn default_title(&self) -> String {
+		match &self.mode {
+			Mode::Normal => strings::commit_title(),
+			Mode::Amend(_) => strings::commit_title_amend(),
+			Mode::Merge(_) => strings::commit_title_merge(),
+			Mode::Revert => strings::commit_title_revert(),
+			Mode::Reword(_) => strings::commit_reword_title(),
+		}
+	}
+
+	fn generate_commit_msg(&mut self) {
+		if self.generating {
+			return;
+		}
+
+		let Result::Ok(cmd) = env::var(COMMIT_MSG_CMD_ENV) else {
+			self.queue.push(InternalEvent::ShowErrorMsg(format!(
+				"{COMMIT_MSG_CMD_ENV} is not set\n\nset it to a command that reads a diff on\nstdin and prints a commit message"
+			)));
+			return;
+		};
+
+		let work_dir =
+			match sync::utils::repo_work_dir(&self.repo.borrow()) {
+				Result::Ok(dir) => dir,
+				Err(e) => {
+					self.queue.push(InternalEvent::ShowErrorMsg(
+						e.to_string(),
+					));
+					return;
+				}
+			};
+
+		self.generating = true;
+		self.input.set_title(format!(
+			"{} (generating message…)",
+			self.default_title()
+		));
+
+		let slot = Arc::clone(&self.generated_msg);
+		let sender = self.sender_app.clone();
+
+		thread::spawn(move || {
+			let result = Self::run_commit_msg_cmd(&work_dir, &cmd);
+			*slot.lock().expect("poisoned lock") = Some(result);
+			sender
+				.send(AsyncAppNotification::CommitMsgGenerated)
+				.ok();
+		});
+	}
+
+	fn run_commit_msg_cmd(
+		work_dir: &str,
+		cmd: &str,
+	) -> Result<String> {
+		let staged = Command::new("git")
+			.args(["diff", "--cached", "--quiet"])
+			.current_dir(work_dir)
+			.status()?;
+
+		if staged.success() {
+			bail!("nothing staged");
+		}
+
+		// wiring the pipe up via the shell avoids deadlocking on
+		// full pipe buffers and applies the shell quoting users
+		// expect for the configured command
+		let output = Command::new("sh")
+			.arg("-c")
+			.arg(format!("git diff --cached | ( {cmd} )"))
+			.current_dir(work_dir)
+			.output()?;
+
+		if !output.status.success() {
+			bail!(
+				"command failed:\n{}",
+				String::from_utf8_lossy(&output.stderr)
+			);
+		}
+
+		let msg = String::from_utf8_lossy(&output.stdout)
+			.trim()
+			.to_string();
+
+		if msg.is_empty() {
+			return Err(anyhow!("command returned an empty message"));
+		}
+
+		Ok(msg)
 	}
 
 	fn draw_branch_name(&self, f: &mut Frame) {
@@ -509,6 +650,14 @@ impl Component for CommitPopup {
 			));
 
 			out.push(CommandInfo::new(
+				strings::commands::commit_generate_msg(
+					&self.key_config,
+				),
+				!self.generating,
+				true,
+			));
+
+			out.push(CommandInfo::new(
 				strings::commands::toggle_verify(
 					&self.key_config,
 					self.verify,
@@ -609,6 +758,12 @@ impl Component for CommitPopup {
 						self.key_config.keys.toggle_signoff,
 					) {
 						self.signoff_commit();
+						true
+					} else if key_match(
+						e,
+						self.key_config.keys.commit_generate_msg,
+					) {
+						self.generate_commit_msg();
 						true
 					} else {
 						false
