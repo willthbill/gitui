@@ -112,6 +112,11 @@ impl CommitPopup {
 	}
 
 	///
+	pub const fn any_work_pending(&self) -> bool {
+		self.generating
+	}
+
+	///
 	pub fn update_async(&mut self, ev: AsyncNotification) {
 		if matches!(
 			ev,

@@ -478,6 +478,7 @@ impl App {
 			|| self.fetch_popup.any_work_pending()
 			|| self.revision_files_popup.any_work_pending()
 			|| self.tags_popup.any_work_pending()
+			|| self.commit_popup.any_work_pending()
 	}
 
 	///
